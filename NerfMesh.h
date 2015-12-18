@@ -57,7 +57,8 @@ typedef enum {
   ERROR_FUCKYOU = 1,
   ERROR_STFU = 2,
   ERROR_GTFO = 3,
-  ERROR_TOOMUCHTUNA = 4
+  ERROR_TOOMUCHTUNA = 4,
+  ERROR_NOBUENO = 5
 } nmesh_errpack_e;
 
 typedef enum {
@@ -74,19 +75,24 @@ typedef enum {
 } nmesh_addme_e;
 
 typedef enum {
+  WHOHAS_REQUEST = 1,
+  WHOHAS_RESPONSE = 2
+} nmesh_whohas_e;
+
+typedef enum {
   HARK_ADD = 1,
   HARK_KILL = 2
 } nmesh_hark_e;
 
 typedef enum {
-  MAX_NODES = 50,
+  MAX_NODES = 64,
   MAX_NEIGHBORS = 4,
   NUM_PIPES = 6,
   MAX_CACHE = 96
 } nmesh_overview_e;
 
 typedef enum {
-  MAX_PAYLOAD = 16
+  MAX_PAYLOAD = 20
 } nmesh_packet_e;
 
 typedef enum {
@@ -102,11 +108,13 @@ const uint32_t MAGIC = 0x1eaf;
 /****************************************************************************/
 /* DATA TYPES */
 /****************************************************************************/
-struct NerfMesh_Header { // 4 bytes
+struct NerfMesh_Header {
   uint8_t src;
   uint8_t dest;
   uint8_t type;
   uint8_t size;
+  uint8_t last_hop;
+  uint8_t num_hops;
   uint32_t magic;
 };
 
@@ -121,6 +129,12 @@ struct NerfMesh_Error{
 
 struct NerfMesh_Ping {
   uint8_t type;
+};
+
+struct NerfMesh_WhoHas {
+  uint8_t type;
+  uint8_t address;
+  uint8_t distance;
 };
 
 struct NerfMesh_AddMe {
@@ -148,7 +162,7 @@ struct Locale {
 };
 
 const NerfMesh_Packet DEFAULT_PACKET =
-  { { 0x00, 0x00, 0x00, 0x00, MAGIC}, {0} };
+  { { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, MAGIC}, {0} };
 
 typedef void (*data_handler)(NerfMesh_Packet packet);
 
@@ -186,6 +200,7 @@ class NerfMesh {
   static int Send_Ping(uint8_t address, uint8_t type);
   static int Send_AddMe(uint8_t address, uint8_t type);
   static int Send_Error(uint8_t address, uint8_t type);
+  static int Send_WhoHas(uint8_t address, uint8_t addr_out, uint8_t dist, uint8_t type);
 
 
   static int Handle_Hark(NerfMesh_Packet packet);
@@ -193,6 +208,7 @@ class NerfMesh {
   static int Handle_Ping(NerfMesh_Packet packet);
   static int Handle_Data(NerfMesh_Packet packet);
   static int Handle_Error(NerfMesh_Packet packet);
+  static int Handle_WhoHas(NerfMesh_Packet packet);
   
 
   static int Hark(uint8_t address, uint8_t distance, uint8_t type);
@@ -211,6 +227,7 @@ class NerfMesh {
 
   int PingAddress(uint8_t address);
   int FindNeighbors();
+  int PollNeighbors(uint8_t address);
 
   int Enable_Comm(data_handler dh);
   int Write(uint8_t address, void *data, size_t size);

@@ -37,6 +37,9 @@ void loop() {
     case 'D':
       nerf.PrintRoutingDirectory();
       break;
+    case 'P':
+      nerf.PollNeighbors(0x22);
+      break;
     }
   }
 }

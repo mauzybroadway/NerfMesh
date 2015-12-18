@@ -43,6 +43,9 @@ void loop() {
     case 'R':
       nerf.Write(0x11, &buf, 1);
       break;
+    case 'P':
+      nerf.PollNeighbors(0x11);
+      break;
     }
   }
 }

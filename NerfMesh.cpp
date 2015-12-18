@@ -58,17 +58,42 @@ NerfMesh::NerfMesh() {
 }
 
 bool NerfMesh::DoWrite(NerfMesh_Packet * packet) {
-  bool out;
+  bool out = false;
   Locale curr = __locale;
+  int next_hop = -1;
 
+  int demo = true;
+  
   /* Prepare chip for writing */
+
   curr.addr[0] = packet->header.dest;
   radio.openWritingPipe(curr.addr);
   radio.stopListening();
 
-  /* WRITE */
-  out = radio.write(packet, packet->header.size + sizeof(NerfMesh_Header));
+  if(demo) {
+    out = false;
+  } else {
+    out = radio.write(packet, packet->header.size + sizeof(NerfMesh_Header));
+  }
+  
+  if(out == false && ( demo || packet->header.type != NMESH_TYPE_ADDME )) {
+    if(!(demo && packet->header.type == NMESH_TYPE_ADDME) &&
+       (next_hop = Find_Next_Hop(packet->header.dest)) < 0){
+      out = false;
+    } else {
 
+      if(next_hop > 0) {
+	curr.addr[0] = next_hop;
+      }
+      
+      radio.openWritingPipe(curr.addr);
+      radio.stopListening();
+      
+      /* WRITE */
+      out = radio.write(packet, packet->header.size + sizeof(NerfMesh_Header));
+    }
+  }
+  
   if(out) {
     Debug(":SUCC\n");
   } else {
@@ -85,7 +110,6 @@ bool NerfMesh::DoWrite(NerfMesh_Packet * packet) {
 	    "nop\n\t""nop\n\t""nop\n\t""nop\n\t"
 	    "nop\n\t""nop\n\t""nop\n\t""nop\n\t");
   }
-  
 
   return out;
 }
@@ -118,7 +142,9 @@ int NerfMesh::Send_Data(uint8_t address, void *data, size_t size) {
   packet.header.dest = address;
   packet.header.type = NMESH_TYPE_DATA;
   packet.header.size = size;
-
+  packet.header.last_hop = my_id;
+  packet.header.num_hops = 1;
+  
   memcpy(&packet.data, data, size);
     
   Debug("Sending Data:%d bytes:", size);
@@ -138,6 +164,8 @@ int NerfMesh::Send_Error(uint8_t address, uint8_t type) {
   packet.header.dest = address;
   packet.header.type = NMESH_TYPE_ERROR;
   packet.header.size = sizeof(NerfMesh_Error);
+  packet.header.last_hop = my_id;
+  packet.header.num_hops = 1;
 
   /* Set up data */
   error->type = type;
@@ -156,11 +184,35 @@ int NerfMesh::Send_AddMe(uint8_t address, uint8_t type) {
   packet.header.dest = address;
   packet.header.type = NMESH_TYPE_ADDME;
   packet.header.size = sizeof(NerfMesh_AddMe);
+  packet.header.last_hop = my_id;
+  packet.header.num_hops = 1;
 
   /* Set up data */
   addme->type = type;
     
   Debug("Sending AddMe:0x%x:%d:", address, type);
+
+  return DoWrite(&packet) ? 0 : ENORESPONSE;
+}
+
+int NerfMesh::Send_WhoHas(uint8_t address, uint8_t addr_out, uint8_t dist, uint8_t type) {
+  NerfMesh_Packet packet = DEFAULT_PACKET;
+  NerfMesh_WhoHas *whohas = ((NerfMesh_WhoHas *)packet.data);
+  
+  /* Set up header */
+  packet.header.src = my_id;
+  packet.header.dest = address;
+  packet.header.type = NMESH_TYPE_WHOHAS;
+  packet.header.size = sizeof(NerfMesh_WhoHas);
+  packet.header.last_hop = my_id;
+  packet.header.num_hops = 1;
+
+  /* Set up data */
+  whohas->type = type;
+  whohas->address = addr_out;
+  whohas->distance = dist;
+    
+  Debug("Sending WhoHas:0x%x:0x%x:%d:", address, whohas->address, packet.header.size);
 
   return DoWrite(&packet) ? 0 : ENORESPONSE;
 }
@@ -174,6 +226,8 @@ int NerfMesh::Send_Ping(uint8_t address, uint8_t type) {
   packet.header.dest = address;
   packet.header.type = NMESH_TYPE_PING;
   packet.header.size = sizeof(NerfMesh_Ping);
+  packet.header.last_hop = my_id;
+  packet.header.num_hops = 1;
 
   /* Set up data */
   ping->type = type;
@@ -191,6 +245,7 @@ int NerfMesh::Send_Ping(uint8_t address, uint8_t type) {
 
 int NerfMesh::PingAddress(uint8_t address) {
   return Send_Ping(address, PING_OUT);
+  //return Send_AddMe(address, ADDME_ADD);
 }
 
 int NerfMesh::Hark(uint8_t address, uint8_t distance, uint8_t type) {
@@ -202,13 +257,21 @@ int NerfMesh::Hark(uint8_t address, uint8_t distance, uint8_t type) {
   packet.header.src = my_id;
   packet.header.size = sizeof(NerfMesh_Hark);
   packet.header.type = NMESH_TYPE_HARK;
+  packet.header.last_hop = my_id;
+  packet.header.num_hops = 1;
 
   /* Set up data */
   hark->address = address;
   hark->distance = distance;
   hark->type = type;
+
+  for(i = 0; i < MAX_NODES; i++) {
+    if(Is_In_Directory(i)) {
+      //Send_Hark();
+    }
+  }
   
-  for(i = 0; i < MAX_NEIGHBORS; i++) {
+  /*for(i = 0; i < MAX_NEIGHBORS; i++) {
     if(neighbors[i] >= 0 && neighbors[i] != address) {
       packet.header.dest = i;
       
@@ -216,7 +279,7 @@ int NerfMesh::Hark(uint8_t address, uint8_t distance, uint8_t type) {
       radio.stopListening();
       radio.startWrite( &packet, NMESH_PACKET_SIZE(packet), 0 );
     }
-  }
+    }*/
 
   return 0;
 }
@@ -279,7 +342,7 @@ int NerfMesh::FindNeighbors() {
 
     //if (Request_AddMe(i) == true) {
     if(Send_AddMe(i, ADDME_ADD) == 0) {
-      delay(1);
+      delay(10);
       //count++;
     }
   }
@@ -290,11 +353,24 @@ int NerfMesh::FindNeighbors() {
   count = num_neighbors - old_num_nei;
 
   if(count == 0) {
-    Debug("NO NEW NEIGHBORS!");
+    Debug("NO NEW NEIGHBORS!\n");
     return ENONEIGHBORS;
   }
 
   Debug("New neighbors: %d\n", count);
+
+  return 0;
+}
+
+int NerfMesh::PollNeighbors(uint8_t address) {
+  int i;
+
+  /* Really would just check all, but demo... */
+  for(i = 0; i < MAX_NODES; i++) {
+    if(Is_Neighbor(i)) {
+      Send_WhoHas(i, address, 0, WHOHAS_REQUEST);
+    }
+  }
 
   return 0;
 }
@@ -308,8 +384,13 @@ bool NerfMesh::Is_In_Directory(uint8_t address) {
 }
 
 int NerfMesh::UpdateDirectoryEntry(uint8_t address, int num_hops, int next_hop) {
-  directory[address].num_hops = num_hops;
-  directory[address].next_hop = next_hop;
+  Debug("UPDATE\n");
+  
+  if(directory[address].num_hops < 0 || num_hops < directory[address].num_hops) {
+    Debug("Adding addr:0x%x num_hops:%d next_hop:0x%x\n", address, num_hops, next_hop);
+    directory[address].num_hops = num_hops;
+    directory[address].next_hop = next_hop;
+  }
 
   return 0;
 }
@@ -337,6 +418,36 @@ int NerfMesh::Handle_Data(NerfMesh_Packet packet) {
     
   return 0;
 }
+
+int NerfMesh::Handle_WhoHas(NerfMesh_Packet packet) {
+  NerfMesh_WhoHas *whohas = (NerfMesh_WhoHas *)packet.data;
+  
+  //Debug("WHOHAS 0x%x 0x%x 0x%x %d\n", packet.data[0], packet.data[1], packet.data[2],
+  //radio.getPayloadSize());
+  
+  /*int i;
+  Debug("-------\n");
+  for(i = 0; i < NerfMesh::radio.getPayloadSize(); i++) {
+    Debug("0x%x\n",packet.data[i]);
+  }
+  Debug("-------\n");
+  */
+
+  if(whohas->type == WHOHAS_REQUEST) {
+    if(Is_In_Directory(whohas->address)) {
+      Debug("IN DIRECTORY\n");
+      Send_WhoHas(packet.header.src,
+		  whohas->address,
+		  directory[whohas->address].num_hops + 1,
+		  WHOHAS_RESPONSE);
+    }
+  } else if(whohas->type == WHOHAS_RESPONSE) {
+    UpdateDirectoryEntry(whohas->address, whohas->distance, packet.header.last_hop);
+  }
+  
+  return 0;
+}
+
 
 int NerfMesh::Handle_Hark(NerfMesh_Packet packet) {
   NerfMesh_Hark *hark = (NerfMesh_Hark *)packet.data;
@@ -381,7 +492,7 @@ int NerfMesh::Handle_AddMe(NerfMesh_Packet packet) {
   }
 
   if(addme->type == ADDME_ADD) {
-
+    Debug("Got ADD\n");
     if(num_neighbors >= MAX_NEIGHBORS) {
       Send_AddMe(packet.header.src, ADDME_FUCKOFF);
     } else if(Is_Neighbor(packet.header.src)) {
@@ -391,7 +502,7 @@ int NerfMesh::Handle_AddMe(NerfMesh_Packet packet) {
     }
             
   } else if( addme->type == ADDME_GOTCHU ) {
-
+    Debug("Got GOTCHU\n");
     Send_AddMe(packet.header.src, (uint8_t)ADDME_COPYTHAT);
     UpdateDirectoryEntry(packet.header.src, 1, packet.header.src);
     AddNeighbor(packet.header.src);
@@ -408,6 +519,7 @@ int NerfMesh::Handle_AddMe(NerfMesh_Packet packet) {
     
   } else if(addme->type == ADDME_CHILLOUT) {
     // TODO: check neighbor stuff
+    Debug("CHILL NIGGA\n");
   } else {
     Debug("INVALID ADDME: received %d\n",addme->type);
     return EINVALID;
@@ -432,42 +544,29 @@ int NerfMesh::Handle_Ping(NerfMesh_Packet packet) {
 }
 
 int NerfMesh::Find_Next_Hop(uint8_t address) {
-  if(my_id == 0x11 || my_id == 0x22)
+  /*if(my_id == 0x11 || my_id == 0x22)
     return 0x33;
 
   if(my_id == 0x33 && address)
-    return 0x11;
-    
-  return ENONEIGHBORS;
+  return 0x11;*/
+
+  if(directory[address].num_hops > 0) {
+    return directory[address].next_hop;
+  } else {
+    Debug("Can't find next hop!\n");
+    return ENONEIGHBORS;
+  }
 }
 
 int NerfMesh::Forward_Packet(NerfMesh_Packet packet) {
-  Locale curr = __locale;
-  int next_hop = 0;
+  packet.header.last_hop = my_id;
+  packet.header.num_hops++; 
 
-  // TODO : routing table stuffs
-  if(my_id == 0x33) {
-    if(packet.header.src == 0x11){
-      next_hop = 0x22;
-    } else if(packet.header.src == 0x22) {
-      next_hop = 0x11;
-    } else {
-      Debug("HOW THE HELL IS THIS EVEN POSSIBLE\n");
-      return ENONEIGHBORS;
-    }
-  } else {
-    Debug("YOU ARENT 0x33, SHUT UP\n");
+  if(DoWrite(&packet) == false) {
+    Send_Error(packet.header.src, ERROR_NOBUENO);
     return ENONEIGHBORS;
   }
-  
-  curr.addr[0] = next_hop;
-  
-  radio.openWritingPipe(curr.addr);
-  radio.stopListening();
-  
-  Debug("Forwarding to 0x%x", packet.header.dest);
-  radio.startWrite( &packet, NMESH_PACKET_SIZE(packet), 0 );
-  
+
   return 0;
 }
 
@@ -475,38 +574,54 @@ void check_radio() {
   bool tx,fail,rx;
   
   NerfMesh::radio.whatHappened(tx,fail,rx);
- 
+  
   // If data is available, handle it accordingly
   if ( rx ){
+    
     if(NerfMesh::radio.getDynamicPayloadSize() < 1) {
       return; 
     }
     
     // Read in the data
     NerfMesh_Packet packet;
-    NerfMesh::radio.read(&packet.header,sizeof(NerfMesh_Header));
+    NerfMesh::radio.read(&packet.header,sizeof(NerfMesh_Packet));    
+    //NerfMesh::radio.read(&packet.data,
+    //NerfMesh::radio.getPayloadSize() - sizeof(NerfMesh_Header));
 
     if(packet.header.magic != MAGIC) {
       Debug("GET FUCKED\n");
-      return;
+      goto cont;
     }
     
-    NerfMesh::radio.read(&packet.data,packet.header.size);
+    if((NerfMesh::my_id == 0x22 && packet.header.last_hop == 0x11) ||
+       (NerfMesh::my_id == 0x11 && packet.header.last_hop == 0x22)) {
+      //NerfMesh::Send_Error(packet.header.last_hop, ERROR_FUCKYOU);
+      goto cont;
+    }
+    
+    /* Update directory entry */
+    NerfMesh::directory[packet.header.src].next_hop = packet.header.last_hop;
+    NerfMesh::directory[packet.header.src].num_hops = packet.header.num_hops;
     
     if(packet.header.dest != NerfMesh::my_id &&
        packet.header.type != NMESH_TYPE_ADDME) {
       NerfMesh::Forward_Packet(packet);
     } else {
+
+      //Debug("HANDLING 0x%x 0x%x 0x%x\n",packet.data[0], packet.data[1], packet.data[2]);
+      
       switch(packet.header.type) {
       case NMESH_TYPE_PING: NerfMesh::Handle_Ping(packet); break;
       case NMESH_TYPE_ADDME: NerfMesh::Handle_AddMe(packet); break;
       case NMESH_TYPE_DATA: NerfMesh::Handle_Data(packet); break;
       case NMESH_TYPE_ERROR: NerfMesh::Handle_Error(packet); break;
-        default: Debug("BAD PACKET\n");
+      case NMESH_TYPE_WHOHAS: NerfMesh::Handle_WhoHas(packet); break;
+      default: Debug("BAD PACKET\n");
       }
     }
   }
-  
+
+ cont:
   // Start listening if transmission is complete
   if( tx || fail ){
     NerfMesh::radio.startListening();
@@ -520,7 +635,7 @@ void NerfMesh::begin(uint8_t id) {
   radio.begin();
   radio.enableDynamicPayloads();
   radio.setAutoAck(true);
-  radio.setRetries(0,15);
+  radio.setRetries(15, 15); // 4ms delay, 15 retries == MAXXXXXX
   radio.setPayloadSize(MAX_PAYLOAD);
   //radio.enableAckPayload();
 
@@ -536,23 +651,9 @@ void NerfMesh::begin(uint8_t id) {
   radio.read(&received,sizeof(received));
     
   radio.flush_tx();
-
-  //uint8_t ADDR11[] = { 0x11,0,0,0,0 };
-  //uint8_t ADDR22[] = { 0x22,0,0,0,0 };
-
   
   radio.openReadingPipe(MY_PIPE, my_locale.addr);
-  
-  /*if(my_id != 0x33) {
-    radio.openReadingPipe(RESERVED_PIPE, RESERVED_ADDR);
-  } else {
-    uint8_t SEXY_ADDR[] = { "sexyy" };
     
-    radio.openReadingPipe(RESERVED_PIPE, SEXY_ADDR); // just ignore shit on this pipe
-    radio.openReadingPipe(2, ADDR11);
-    radio.openReadingPipe(3, ADDR22);
-    }*/
-  
   radio.openWritingPipe(RESERVED_ADDR);
   
   radio.startListening();

@@ -22,6 +22,15 @@ void loop() {
     case 'S':
       nerf.PrintRadioDetails();
       break;
+    case 'F':
+      nerf.FindNeighbors();
+      break;
+    case 'N':
+      nerf.PrintNeighbors();
+      break;
+    case 'D':
+      nerf.PrintRoutingDirectory();
+      break;
     }
   }
 }
