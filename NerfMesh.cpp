@@ -350,14 +350,14 @@ int NerfMesh::FindNeighbors() {
   /*Enable RX interrupts*/
   //radio.unmaskIRQ(false, false, true);
 
-  count = num_neighbors - old_num_nei;
+  /*count = num_neighbors - old_num_nei;
 
   if(count == 0) {
     Debug("NO NEW NEIGHBORS!\n");
     return ENONEIGHBORS;
-  }
+    }*/
 
-  Debug("New neighbors: %d\n", count);
+  //Debug("New neighbors: %d\n", count);
 
   return 0;
 }
@@ -519,7 +519,8 @@ int NerfMesh::Handle_AddMe(NerfMesh_Packet packet) {
     
   } else if(addme->type == ADDME_CHILLOUT) {
     // TODO: check neighbor stuff
-    Debug("CHILL NIGGA\n");
+    //Debug("CHILL NIGGA\n");
+    Debug("ADDING NEIGHBOR: 0x%x\n",packet.header.src);
   } else {
     Debug("INVALID ADDME: received %d\n",addme->type);
     return EINVALID;
@@ -562,10 +563,14 @@ int NerfMesh::Forward_Packet(NerfMesh_Packet packet) {
   packet.header.last_hop = my_id;
   packet.header.num_hops++; 
 
+  Debug("Forward");
+  
   if(DoWrite(&packet) == false) {
     Send_Error(packet.header.src, ERROR_NOBUENO);
     return ENONEIGHBORS;
   }
+
+  //Debug("Forwarding from 0x%x to 0x%x\n",packet.header.src, packet.header.dest);
 
   return 0;
 }
@@ -584,9 +589,9 @@ void check_radio() {
     
     // Read in the data
     NerfMesh_Packet packet;
-    NerfMesh::radio.read(&packet.header,sizeof(NerfMesh_Packet));    
-    //NerfMesh::radio.read(&packet.data,
-    //NerfMesh::radio.getPayloadSize() - sizeof(NerfMesh_Header));
+    NerfMesh::radio.read(&packet, sizeof(NerfMesh_Packet));
+
+    //Debug("GOT\n");
 
     if(packet.header.magic != MAGIC) {
       Debug("GET FUCKED\n");
@@ -686,11 +691,13 @@ void NerfMesh::PrintNeighbors() {
 void NerfMesh::PrintRoutingDirectory() {
   int i;
 
-  printf("[ ");
+  //printf("[ ");
   for(i = 0; i < MAX_NODES; i++) {
-    printf("0x%x{num_hops:%d next_hop:0x%x}\n",i,directory[i].num_hops, directory[i].next_hop);
+    if(Is_In_Directory(i))
+      printf("0x%x{num_hops:%d next_hop:0x%x}\n",i,
+	     directory[i].num_hops, directory[i].next_hop);
   }
-  printf("]");
+  //printf("]");
 }
 
 int NerfMesh::Enable_Comm(data_handler dh) {

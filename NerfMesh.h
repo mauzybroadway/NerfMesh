@@ -115,6 +115,7 @@ struct NerfMesh_Header {
   uint8_t size;
   uint8_t last_hop;
   uint8_t num_hops;
+  //uint16_t checksum;
   uint32_t magic;
 };
 

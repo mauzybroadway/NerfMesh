@@ -8,22 +8,22 @@ NerfMesh nerf;
 
 void handler(NerfMesh_Packet packet);
 
-void setup() {
-  pinMode(4,INPUT);
-  digitalWrite(4, HIGH);
-  
+void setup() {  
   Serial.begin(115200);
   printf_begin();
 
-  nerf.begin(0x11);
+  nerf.begin(0x22);
   nerf.Enable_Comm(handler);
 }
 
 void loop() {
+
+  char buf = 'f';
+  
   if(Serial.available()){
     switch(toupper(Serial.read())){
     case 'T':
-      nerf.PingAddress(0x22);
+      nerf.PingAddress(0x11);
       break;
     case 'S':
       nerf.PrintRadioDetails();
@@ -38,27 +38,15 @@ void loop() {
       nerf.PrintRoutingDirectory();
       break;
     case 'P':
-      nerf.PollNeighbors(0x22);
+      nerf.PollNeighbors(0x11);
+      break;
+    case 'R':
+      nerf.Write(0x11, &buf, 1);
       break;
     }
   }
 }
 
 void handler(NerfMesh_Packet packet) {
-  //char buf[] = { 'f','u','c','k','\0'};
-  //char buf = 'a';
-  uint8_t y[] = { 'y' };
-  uint8_t n[] = { 'n' };
-  uint8_t jump = 0;
-  
-  printf("%d\n", digitalRead(4));
-  
-  if(packet.data[0] == 'f') {
-    if(digitalRead(4)) {
-      nerf.Write(0x22, n, 1);
-    } else {
-      nerf.Write(0x22, y, 1);
-    }
-  }
-  
+  printf("%c\n", packet.data[0]);
 }

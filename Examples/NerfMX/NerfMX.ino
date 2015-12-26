@@ -17,7 +17,7 @@ void loop() {
   if(Serial.available()){
     switch(toupper(Serial.read())){
     case 'T':
-      nerf.PingAddress(0x11);
+      nerf.PingAddress(0x22);
       break;
     case 'S':
       nerf.PrintRadioDetails();
